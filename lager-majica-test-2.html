@@ -60,7 +60,8 @@
             margin-bottom: 6px
         }
 
-        input {
+        input,
+        select {
             width: 100%;
             padding: 12px;
             border: 1px solid #cbd5e1;
@@ -317,6 +318,23 @@
                     Ukupno majica: 0
                 </div>
                 <input class="search" id="search" placeholder="Pretraži model, boju ili veličinu..." type="search" />
+                <div class="form-grid" style="margin-bottom:15px">
+                    <div>
+                        <label for="filterModel">MODEL</label>
+                        <select id="filterModel"><option value="">Svi modeli</option></select>
+                    </div>
+                    <div>
+                        <label for="filterBoja">BOJA</label>
+                        <select id="filterBoja"><option value="">Sve boje</option></select>
+                    </div>
+                    <div>
+                        <label for="filterVelicina">VELIČINA</label>
+                        <select id="filterVelicina"><option value="">Sve veličine</option></select>
+                    </div>
+                    <div class="actions">
+                        <button class="secondary" id="resetFilters" type="button">Poništi filtere</button>
+                    </div>
+                </div>
                 <div class="table-wrap">
                     <table>
                         <thead>
@@ -409,10 +427,34 @@
             $("cancelBtn").classList.add("hidden")
         }
 
+        function populateFilters() {
+            [
+                ["filterModel", "model", "Svi modeli"],
+                ["filterBoja", "boja", "Sve boje"],
+                ["filterVelicina", "velicina", "Sve veličine"]
+            ].forEach(([id, field, placeholder]) => {
+                const select = $(id);
+                const selected = select.value;
+                const values = [...new Set(shirts.map(item => String(item[field] ?? "")))]
+                    .filter(value => value.trim() !== "")
+                    .sort((a, b) => a.localeCompare(b, "bs", { numeric: true }));
+                select.replaceChildren(new Option(placeholder, ""));
+                values.forEach(value => select.add(new Option(value, value)));
+                select.value = values.includes(selected) ? selected : "";
+            });
+        }
+
         function renderShirts() {
             const query = $("search").value.trim().toLowerCase();
 
+            const model = $("filterModel").value;
+            const boja = $("filterBoja").value;
+            const velicina = $("filterVelicina").value;
+
             const filtered = shirts.filter(item =>
+                (!model || String(item.model ?? "") === model) &&
+                (!boja || String(item.boja ?? "") === boja) &&
+                (!velicina || String(item.velicina ?? "") === velicina) &&
                 [item.model, item.boja, item.velicina].some(value =>
                     String(value ?? "").toLowerCase().includes(query)
                 )
@@ -523,6 +565,7 @@
                 if (error) throw error;
                 if (revision !== sessionRevision) return;
                 shirts = data || [];
+                populateFilters();
                 renderShirts();
                 renderDopuna();
                 setStatus("Podaci su učitani iz online baze.")
@@ -672,6 +715,15 @@
         });
         $("cancelBtn").addEventListener("click", resetForm);
         $("search").addEventListener("input", renderShirts);
+        ["filterModel", "filterBoja", "filterVelicina"].forEach(id => {
+            $(id).addEventListener("change", renderShirts);
+        });
+        $("resetFilters").addEventListener("click", () => {
+            ["filterModel", "filterBoja", "filterVelicina", "search"].forEach(id => {
+                $(id).value = "";
+            });
+            renderShirts();
+        });
         async function initialize() {
             try {
                 if (!window.supabase) throw Error("Supabase biblioteka nije učitana.");
