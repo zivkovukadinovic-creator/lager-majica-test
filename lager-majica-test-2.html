@@ -108,21 +108,31 @@
 
         .app-header {
             display: flex;
-            align-items: center;
+            align-items: flex-start;
             justify-content: space-between;
             gap: 20px;
-            margin-bottom: 24px
+            margin-bottom: 16px
         }
 
         .app-header h1, .app-header .subtitle {
             text-align: left
         }
 
+        .app-header h1 {
+            margin: 0;
+            line-height: 1.15
+        }
+
         .app-header .subtitle {
-            margin-bottom: 0
+            margin: 6px 0 0
         }
 
         .brand {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+            line-height: 1.2;
             text-align: center;
             flex-shrink: 0;
             color: #17365d;
@@ -132,8 +142,7 @@
         .brand img {
             display: block;
             width: 140px;
-            height: auto;
-            margin-bottom: 6px
+            height: auto
         }
 
         .filter-panel {
