@@ -58,11 +58,11 @@ async function save({rows=[],edit=null}) {
   await a.element('shirtForm').listeners.submit({preventDefault(){}});
   return {a,calls};
 }
-test('new write sends canonical RPC payload; legacy single match reuses stored key',async()=>{
+test('new and legacy-match writes send canonical RPC payload',async()=>{
   const {calls}=await save({});
   assert.equal(calls[0][2].p_model,'Muška'); assert.equal(calls[0][2].p_velicina,'2XL');
   const existing=await save({rows:[{id:9,model:'Muska',boja:'crna',velicina:'XXL'}]});
-  assert.equal(existing.calls[0][2].p_model,'Muska'); assert.equal(existing.calls[0][2].p_velicina,'XXL');
+  assert.equal(existing.calls[0][2].p_model,'Muška'); assert.equal(existing.calls[0][2].p_velicina,'2XL');
   assert.equal(existing.calls[0][2].p_kolicina,3); assert.equal(existing.calls[0][2].p_minimalna_kolicina,5);
 });
 test('existing duplicate groups and edit collisions block writes without merging',async()=>{
@@ -90,4 +90,9 @@ test('Excel receives canonical labels and natural order without altering quantit
   assert.deepEqual(rows.map(r=>r[2]),['XS','XL','2XL','10XL']);
   assert.ok(rows.every(r=>r[0]==='Dječija' && r[3]===1 && r[4]===3));
   assert.match(a.element('status').textContent,/preuzet/);
+});
+
+test('collision identity retains existing database case-insensitive color/custom-name rules',()=>{
+  const a=app();
+  assert.equal(a.run('sameShirt({model:" basic ",boja:" CRNA ",velicina:"xxl"},"Basic","crna","2XL")'),true);
 });

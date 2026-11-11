@@ -33,8 +33,8 @@ FROM pg_trigger WHERE tgrelid = 'public.majice'::regclass AND NOT tgisinternal;
 -- Preserve exact color spelling, matching the browser's existing color behavior.
 WITH keys AS (
   SELECT id, model, boja, velicina, kolicina, minimalna_kolicina,
-    CASE lower(translate(regexp_replace(model, '[[:space:]]', '', 'g'),
-                         'šŠžŽčČćĆ', 'sSzZcCcC'))
+    CASE lower(regexp_replace(regexp_replace(normalize(model, NFD),
+                         '[̀-ͯ]', '', 'g'), '[[:space:]]', '', 'g'))
       WHEN 'muska' THEN 'Muška' WHEN 'zenska' THEN 'Ženska'
       WHEN 'djecja' THEN 'Dječija' WHEN 'djecija' THEN 'Dječija'
       ELSE model END AS canonical_model,
@@ -49,9 +49,10 @@ WITH keys AS (
     ELSE velicina END AS canonical_size
   FROM keys
 )
-SELECT canonical_model, boja, canonical_size, count(*) AS row_count,
+SELECT lower(btrim(canonical_model)) AS model_key, lower(btrim(boja)) AS color_key,
+       upper(btrim(canonical_size)) AS size_key, count(*) AS row_count,
        jsonb_agg(jsonb_build_object('id', id, 'model', model, 'velicina', velicina,
          'kolicina', kolicina, 'minimalna_kolicina', minimalna_kolicina) ORDER BY id) AS rows_to_review
 FROM normalized
-GROUP BY canonical_model, boja, canonical_size HAVING count(*) > 1;
+GROUP BY lower(btrim(canonical_model)), lower(btrim(boja)), upper(btrim(canonical_size)) HAVING count(*) > 1;
 ROLLBACK;

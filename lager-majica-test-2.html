@@ -540,8 +540,11 @@
         }
 
         function sameShirt(item, model, boja, velicina) {
-            return normalizeModel(item.model) === model && item.boja === boja &&
-                normalizeSize(item.velicina) === velicina;
+            const modelKey = value => normalizeModel(value).trim().toLowerCase();
+            const sizeKey = value => normalizeSize(value).trim().toUpperCase();
+            return modelKey(item.model) === modelKey(model) &&
+                String(item.boja ?? "").trim().toLowerCase() === boja.trim().toLowerCase() &&
+                sizeKey(item.velicina) === sizeKey(velicina);
         }
 
         function resetForm() {
@@ -892,11 +895,10 @@
                     }
                 } else {
                     result = await db.rpc("dodaj_majice_sa_minimumom", {
-                        // Reuse a legacy row's exact key so the existing RPC can find it.
-                        // Once the reviewed SQL migration is applied these values are canonical.
-                        p_model: matches[0]?.model ?? model,
+                        // Requires the reviewed TEST SQL migration before using this version.
+                        p_model: model,
                         p_boja: boja,
-                        p_velicina: matches[0]?.velicina ?? velicina,
+                        p_velicina: velicina,
                         p_kolicina: kolicina,
                         p_minimalna_kolicina: minimalna_kolicina
                     });
