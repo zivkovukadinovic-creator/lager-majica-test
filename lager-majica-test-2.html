@@ -503,6 +503,47 @@
         }
             ;
         const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" })[char]);
+        // Only known aliases are rewritten; custom model/size names retain their spelling.
+        function normalizeModel(value) {
+            const original = String(value ?? "");
+            const key = original.normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+                .replace(/\s+/g, "").toLowerCase();
+            const aliases = new Map([["muska", "Muška"], ["zenska", "Ženska"], ["djecja", "Dječija"], ["djecija", "Dječija"]]);
+            return aliases.get(key) ?? original;
+        }
+
+        function normalizeSize(value) {
+            const original = String(value ?? "");
+            const key = original.trim().toUpperCase();
+            if (["XS", "S", "M", "L", "XL"].includes(key)) return key;
+            if (/^X{2,}L$/.test(key)) return (key.length - 1) + "XL";
+            const numeric = key.match(/^([1-9]\d*)XL$/);
+            if (numeric) return numeric[1] === "1" ? "XL" : numeric[1] + "XL";
+            return original;
+        }
+
+        function compareSizes(left, right) {
+            const a = normalizeSize(left), b = normalizeSize(right);
+            const rank = size => {
+                const basic = ["XS", "S", "M", "L", "XL"].indexOf(size);
+                if (basic >= 0) return BigInt(basic);
+                return /^[1-9]\d*XL$/.test(size) ? BigInt(size.slice(0, -2)) + 3n : null;
+            };
+            const x = rank(a), y = rank(b);
+            if (x !== null && y !== null) return x < y ? -1 : x > y ? 1 : 0;
+            if (x !== null || y !== null) return x !== null ? -1 : 1;
+            return a.localeCompare(b, "bs", { numeric: true });
+        }
+
+        function normalizeShirt(item) {
+            return { ...item, model: normalizeModel(item.model), velicina: normalizeSize(item.velicina) };
+        }
+
+        function sameShirt(item, model, boja, velicina) {
+            return normalizeModel(item.model) === model && item.boja === boja &&
+                normalizeSize(item.velicina) === velicina;
+        }
+
         function resetForm() {
             $("shirtForm").reset();
             $("kolicina").value = "0";
@@ -522,7 +563,7 @@
                 const selected = select.value;
                 const values = [...new Set(shirts.map(item => String(item[field] ?? "")))]
                     .filter(value => value.trim() !== "")
-                    .sort((a, b) => a.localeCompare(b, "bs", { numeric: true }));
+                    .sort(field === "velicina" ? compareSizes : (a, b) => a.localeCompare(b, "bs", { numeric: true }));
                 select.replaceChildren(new Option(placeholder, ""));
                 values.forEach(value => select.add(new Option(value, value)));
                 select.value = values.includes(selected) ? selected : "";
@@ -544,7 +585,7 @@
                 (sum, item) => sum + Number(item.kolicina || 0), 0
             );
 
-            const zaDopunu = shirts.filter(needsRestock);
+            const zaDopunu = shirts.filter(needsRestock).sort(compareOrderItems);
 
             $("summary").textContent =
                 "Ukupno majica: " + total +
@@ -613,7 +654,7 @@
             };
             return compare(a.model, b.model, ["muška", "ženska", "dječija"]) ||
                 compare(a.boja, b.boja, ["bijela", "crna"]) ||
-                compare(a.velicina, b.velicina, ["s", "m", "l", "xl", "xxl", "xxxl"]);
+                compareSizes(a.velicina, b.velicina);
         }
 
         async function exportOrder() {
@@ -677,7 +718,7 @@
         }
 
         function renderDopuna() {
-            const zaDopunu = shirts.filter(needsRestock);
+            const zaDopunu = shirts.filter(needsRestock).sort(compareOrderItems);
 
             $("dopunaSummary").textContent =
                 "Broj stavki za dopunu: " + zaDopunu.length;
@@ -719,7 +760,7 @@
                     = await db.from(TABLE_NAME).select("id, model, boja, velicina, kolicina, minimalna_kolicina").order("model", { ascending: true });
                 if (error) throw error;
                 if (revision !== sessionRevision) return;
-                shirts = data || [];
+                shirts = (data || []).map(normalizeShirt).sort(compareOrderItems);
                 populateFilters();
                 renderShirts();
                 renderDopuna();
@@ -798,9 +839,9 @@
                 return;
             }
 
-            const model = $("model").value.trim();
+            const model = normalizeModel($("model").value.trim());
             const boja = $("boja").value.trim();
-            const velicina = $("velicina").value.trim();
+            const velicina = normalizeSize($("velicina").value.trim());
             const kolicina = Number($("kolicina").value);
             const minimalna_kolicina = Number($("minimalna_kolicina").value);
 
@@ -820,6 +861,18 @@
             $("saveBtn").disabled = true;
 
             try {
+                // Refresh identities before writing; never merge quantities/minima in the browser.
+                // A database canonical key is still required for concurrent/direct-client writes.
+                const { data: existing, error: lookupError } = await db.from(TABLE_NAME)
+                    .select("id, model, boja, velicina");
+                if (lookupError) throw lookupError;
+                const matches = (existing || []).filter(item => sameShirt(item, model, boja, velicina));
+                if (matches.length > 1) {
+                    throw Error("Postoje ekvivalentne stavke. Potrebna je provjera količina i minimuma u TESTNOJ bazi prije čuvanja.");
+                }
+                if (editingId !== null && matches.some(item => String(item.id) !== String(editingId))) {
+                    throw Error("Stavka istog modela, boje i veličine već postoji. Uredi postojeću stavku; količine i minimumi nisu spojeni.");
+                }
                 let result;
 
                 if (editingId !== null) {
@@ -839,9 +892,11 @@
                     }
                 } else {
                     result = await db.rpc("dodaj_majice_sa_minimumom", {
-                        p_model: model,
+                        // Reuse a legacy row's exact key so the existing RPC can find it.
+                        // Once the reviewed SQL migration is applied these values are canonical.
+                        p_model: matches[0]?.model ?? model,
                         p_boja: boja,
-                        p_velicina: velicina,
+                        p_velicina: matches[0]?.velicina ?? velicina,
                         p_kolicina: kolicina,
                         p_minimalna_kolicina: minimalna_kolicina
                     });
