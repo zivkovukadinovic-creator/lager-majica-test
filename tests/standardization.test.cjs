@@ -90,9 +90,54 @@ test('Excel receives canonical labels and natural order without altering quantit
   assert.deepEqual(rows.map(r=>r[2]),['XS','XL','2XL','10XL']);
   assert.ok(rows.every(r=>r[0]==='Dječija' && r[3]===1 && r[4]===3));
   assert.match(a.element('status').textContent,/preuzet/);
+  rows.length=0;
+  const expected=[['Muška','Bijela','XS'],['Muška','Bijela','5XL'],
+    ['Muška','Crna','S'],['Muška','Zelena','M'],['Ženska','Bijela','XL'],
+    ['Ženska','Crna','2XL'],['Dječija','Bijela','3XL'],['Basic','Crna','Custom']];
+  a.context.fixture=expected.map(([model,boja,velicina],id)=>({id,model,boja,velicina,kolicina:1,minimalna_kolicina:3})).reverse();
+  a.run('shirts=fixture; renderShirts()');
+  const inventory=[...a.element('shirtList').innerHTML.matchAll(/<tr[^>]*>\s*<td>(.*?)<\/td>\s*<td>(.*?)<\/td>\s*<td>(.*?)<\/td>/g)].map(m=>m.slice(1));
+  await a.run('exportOrder()');
+  assert.deepEqual(rows.map(r=>Array.from(r.slice(0,3))),expected);
+  assert.deepEqual(inventory,expected);
+
 });
 
 test('collision identity retains existing database case-insensitive color/custom-name rules',()=>{
   const a=app();
   assert.equal(a.run('sameShirt({model:" basic ",boja:" CRNA ",velicina:"xxl"},"Basic","crna","2XL")'),true);
+});
+
+test('inventory and filter choices share model/color/size priority for every filter combination',()=>{
+  const a=app();
+  // Deliberately unsorted, sparse database rows: no missing variants may be invented.
+  const expected=[
+    ['Muška','Bijela','XS'],['Muška','Bijela','S'],['Muška','Bijela','M'],
+    ['Muška','Bijela','L'],['Muška','Bijela','XL'],['Muška','Bijela','2XL'],
+    ['Muška','Bijela','3XL'],['Muška','Bijela','4XL'],['Muška','Bijela','5XL'],
+    ['Muška','Bijela','6XL'],['Muška','Bijela','Custom'],
+    ['Muška','Crna','XS'],['Muška','Zelena','M'],
+    ['Ženska','Bijela','M'],['Ženska','Crna','S'],
+    ['Dječija','Bijela','XS'],['Dječija','Crna','L'],['Basic','Bijela','M']
+  ];
+  const rows=expected.map(([model,boja,velicina],id)=>({id,model,boja,velicina,kolicina:id,minimalna_kolicina:30})).reverse();
+  a.context.fixture=rows;
+  a.run('shirts=fixture; populateFilters()');
+  assert.deepEqual(a.element('filterModel').options.map(x=>x.value),['','Muška','Ženska','Dječija','Basic']);
+  assert.deepEqual(a.element('filterBoja').options.map(x=>x.value),['','Bijela','Crna','Zelena']);
+  assert.deepEqual(a.element('filterVelicina').options.map(x=>x.value),['','XS','S','M','L','XL','2XL','3XL','4XL','5XL','6XL','Custom']);
+  const original=JSON.stringify(rows);
+  for(const model of a.element('filterModel').options.map(x=>x.value)) {
+    for(const boja of a.element('filterBoja').options.map(x=>x.value)) {
+      for(const velicina of a.element('filterVelicina').options.map(x=>x.value)) {
+        a.element('filterModel').value=model;
+        a.element('filterBoja').value=boja;
+        a.element('filterVelicina').value=velicina;
+        a.run('renderShirts()');
+        const actual=[...a.element('shirtList').innerHTML.matchAll(/<tr[^>]*>\s*<td>(.*?)<\/td>\s*<td>(.*?)<\/td>\s*<td>(.*?)<\/td>/g)].map(m=>m.slice(1));
+        assert.deepEqual(actual,expected.filter(r=>(!model||r[0]===model)&&(!boja||r[1]===boja)&&(!velicina||r[2]===velicina)));
+      }
+    }
+  }
+  assert.equal(JSON.stringify(rows),original);
 });
